@@ -1,0 +1,16 @@
+{
+  "name": "klaviyo-mcp",
+  "version": "1.0.0",
+  "description": "Minimal Klaviyo MCP-style proxy for n8n",
+  "main": "api/mcp.js",
+  "scripts": {
+    "start": "vercel dev"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}
+
