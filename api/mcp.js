@@ -60,7 +60,8 @@ function cleanBodyForAnalysis(html) {
     cleaned = cleaned.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ');
     
     // 2. Remove all HTML comments (which often contain MSO/IE specific CSS noise)
-    cleaned = cleaned.replace(//g, ' '); // <-- THIS LINE IS NOW CORRECTED!
+    cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, ' ');
+
 
     // 3. Remove most remaining HTML tags and collapse whitespace
     return stripHtml(cleaned);
