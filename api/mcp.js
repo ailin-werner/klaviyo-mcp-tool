@@ -49,10 +49,10 @@ function stripHtml(html) {
 }
 
 // --------------------------------------------------------------------------------------
-// --- Helper Function: Clean HTML Body for Analysis (FIX 05: Force Vercel Refresh) ---
+// --- Helper Function: Clean HTML Body for Analysis (Theme Generation) ---
 // --------------------------------------------------------------------------------------
 
-function cleanBodyForAnalysis(html) { // <-- Function start
+function cleanBodyForAnalysis(html) {
     if (!html) return '';
 
     // 1. Remove all content inside <style>...</style> and <script>...</script> tags
@@ -64,7 +64,7 @@ function cleanBodyForAnalysis(html) { // <-- Function start
 
     // 3. Remove most remaining HTML tags and collapse whitespace
     return stripHtml(cleaned);
-} // <-- SYNTAX FIX: This is the critical closing brace on line ~69.
+} 
 
 
 // --------------------------------------------------------------------------------------
@@ -108,7 +108,7 @@ async function getTemplateHtml(templateId, apiKey) {
 // --------------------------------------------------------------------------------------
 // --- Main Export & Routing (Defensive Body Parsing) ---
 // --------------------------------------------------------------------------------------
-const FIX_VERSION = 5; // FORCING VERCEL CACHE CLEAR
+
 module.exports = async (req, res) => {
 try {
 const urlPath = req.url || '';
