@@ -112,7 +112,8 @@ if (!keyword) {
 }
 
 // ✅ Final Structure: Including BOTH channel filter AND status filter.
-const campaignsUrl = KLAVIYO_BASE + '/campaigns?filter=and(equals(messages.channel,"email"),equals(status,"Sent"))';
+const filter = encodeURIComponent("and(equals(messages.channel,'email'),equals(status,'Sent'))");
+const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}&page[size]=100`;
 const campaignsResp = await fetch(campaignsUrl, {
     method: 'GET',
     headers: {
