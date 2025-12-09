@@ -7,13 +7,9 @@
     "start": "vercel dev"
   },
   "dependencies": {
-    "node-fetch": "^2.6.7"
+    "node-fetch": "^2.7.0" 
   },
   "engines": {
     "node": "24.x"
-  },
-  "dependencies": {
-    "node-fetch": "^2.7.0"
   }
 }
-
