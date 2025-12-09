@@ -11,7 +11,7 @@ try { return require('node-fetch'); } catch (e) { return undefined; }
 
 // ✅ FIXED: Switched back to the modern, non-retired API base path (V3/V4)
 const KLAVIYO_BASE = 'https://a.klaviyo.com/api';
-const KLAVIYO_V3_API_BASE = KLAVIYO_BASE; 
+const KLAVIYO_V3_API_BASE = KLAVIYO_BASE; 
 
 
 function safeJsonParse(text) {
@@ -94,7 +94,7 @@ return jsonResponse(res, { error: 'internal_error', details: String(err && err.m
 };
 
 // --------------------------------------------------------------------------------------
-// --- runSearchCampaigns Logic (FINAL WORKING VERSION) ---
+// --- runSearchCampaigns Logic (FINAL WORKING VERSION with all requested fields) ---
 // --------------------------------------------------------------------------------------
 
 async function runSearchCampaigns(input = {}, req, res) {
@@ -114,7 +114,7 @@ if (!keyword) {
 // 1. Fetch initial campaign list using 'include' (Most reliable V3 method)
 const filter = encodeURIComponent("and(equals(messages.channel,'email'),equals(status,'Sent'))");
 // Using 'include' to fetch messages in one reliable request.
-const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}&include=campaign-messages`; 
+const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}&include=campaign-messages,template`; 
 const campaignsResp = await fetch(campaignsUrl, {
     method: 'GET',
     headers: {
@@ -135,9 +135,10 @@ const rawItems = Array.isArray(campaignsJson?.data) ? campaignsJson.data : (Arra
 
 // We need the included message data for extraction
 const includedMessages = Array.isArray(campaignsJson?.included) ? campaignsJson.included.filter(i => i.type === 'campaign-message') : [];
+const includedTemplates = Array.isArray(campaignsJson?.included) ? campaignsJson.included.filter(i => i.type === 'template') : [];
 
 
-// 2. Extract data 
+// 2. Extract data (including new fields)
 const allCampaigns = (rawItems || []).map(item => {
     const id = item.id || item?.campaign_id || item?.uid || (item?.attributes && item.attributes.id) || null;
     const attrs = item.attributes || item || {};
@@ -145,13 +146,28 @@ const allCampaigns = (rawItems || []).map(item => {
     const created_at = attrs.created_at || attrs.created || attrs.sent_at || attrs.scheduled || item.created_at || item.sent_at || null;
 
     const subject_lines = [];
-    // Extract subject from the 'included' section based on relationship
+    let preview_text = '';
+    let body_html = '';
+    
+    // Extract content from the 'included' section (Campaign Message)
     const messageRelationship = item?.relationships?.['campaign-messages']?.data?.[0];
     if (messageRelationship) {
         const message = includedMessages.find(i => i.id === messageRelationship.id);
-        // 💥 FINAL FIX: Use the correct path found in the debug dump: attributes.content.subject
+        
+        // Subject Line
         const subject = message?.attributes?.content?.subject || message?.attributes?.definition?.content?.subject; 
         if (subject) subject_lines.push(subject);
+        
+        // 🌟 NEW: Preview Text
+        preview_text = message?.attributes?.content?.preview_text || '';
+        
+        // Find the Template related to this Message
+        const templateRelationship = message?.relationships?.template?.data;
+        if (templateRelationship) {
+            const template = includedTemplates.find(i => i.id === templateRelationship.id);
+            // 🌟 NEW: Body HTML is often found in the related template's attributes
+            body_html = template?.attributes?.html || '';
+        }
     }
 
     // Keep old subject logic as fallback for any pre-V3 data
@@ -164,6 +180,9 @@ const allCampaigns = (rawItems || []).map(item => {
       name,
       subject_lines: Array.from(new Set(subject_lines)).filter(Boolean),
       created_at,
+        // 🌟 NEW FIELDS IN MAP
+        preview_text,
+        body_html,
       raw: item,
     };
 });
@@ -175,10 +194,13 @@ const matched = allCampaigns.filter(c => {
     if (!c) return false;
     // Match on Name 
     if ((c.name || '').toLowerCase().includes(keywordLower)) return true; 
-    // Match on subject line (This is now reliable!)
+    // Match on subject line
     for (const s of (c.subject_lines || [])) {
       if ((s || '').toLowerCase().includes(keywordLower)) return true;
     }
+    // 🌟 NEW: Also match on body_html (simple inclusion check)
+    if ((c.body_html || '').toLowerCase().includes(keywordLower)) return true;
+    
     return false;
 }).slice(0, limit);
 
@@ -187,7 +209,7 @@ const performance_metrics = [];
 const themes = [];
 const campaignsResult = [];
 
-// 4. Process matches 
+// 4. Process matches and fetch metrics
 for (const c of matched) {
     let metrics = { open_rate: null, click_rate: null, conversion_rate: null, sent: null, revenue: null, raw: null };
     try {
@@ -222,7 +244,8 @@ for (const c of matched) {
       }
     } catch (e) {}
 
-    const textToAnalyze = [c.name].concat(c.subject_lines || []).join(' ').toLowerCase();
+    // Theme generation now includes subject/preview text
+    const textToAnalyze = [c.name].concat(c.subject_lines || []).concat(c.preview_text || []).join(' ').toLowerCase();
     const tokens = textToAnalyze.split(/[^a-z0-9]+/).filter(Boolean);
     const freq = {};
     tokens.forEach(t => { if (t.length > 2) freq[t] = (freq[t] || 0) + 1; });
@@ -248,6 +271,9 @@ for (const c of matched) {
       name: c.name,
       subject_lines: c.subject_lines,
       sent_at: c.created_at,
+        // 🌟 NEW FIELDS IN OUTPUT
+        preview_text: c.preview_text,
+        body_html: c.body_html,
       metrics: metrics.raw || null,
       themes: topThemes,
     });
