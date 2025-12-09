@@ -11,7 +11,6 @@ try { return require('node-fetch'); } catch (e) { return undefined; }
 
 // ✅ FIXED: Switched back to the modern, non-retired API base path (V3/V4)
 const KLAVIYO_BASE = 'https://a.klaviyo.com/api';
-// --- NEW: Helper to get base V3 API URL ---
 const KLAVIYO_V3_API_BASE = KLAVIYO_BASE; 
 
 
@@ -34,68 +33,8 @@ req.on('error', (e) => reject(e));
 }
 
 // --------------------------------------------------------------------------------------
-// ✅ NEW HELPER FUNCTION: Fetches the Subject Line from the Campaign Message (ROBUST FIX)
+// ❌ REMOVED: getMessageDetails helper is no longer needed (replaced by 'include')
 // --------------------------------------------------------------------------------------
-async function getMessageDetails(campaignId, apiKey) {
-    // 1. Fetch the message IDs using the direct endpoint: /campaigns/{id}/campaign-messages
-    const messagesUrl = `${KLAVIYO_V3_API_BASE}/campaigns/${campaignId}/campaign-messages`;
-    let messageId = null;
-
-    try {
-        const messagesResponse = await fetch(messagesUrl, {
-            headers: {
-                'Authorization': `Klaviyo-API-Key ${apiKey}`,
-                'Accept': 'application/json',
-                'revision': '2023-10-15',
-            }
-        });
-        
-        if (!messagesResponse.ok) {
-            // Log for Vercel, but continue
-            console.error(`Messages fetch failed: ${messagesResponse.status}`);
-            return { subject: null };
-        }
-        
-        const messagesData = await messagesResponse.json();
-        // The message ID is usually the ID of the first data element
-        messageId = messagesData?.data?.[0]?.id;
-    } catch (e) {
-        console.error("Failed to get message IDs:", e.message);
-        return { subject: null };
-    }
-
-    // 2. Use the message ID to fetch the full message details (Subject Line)
-    if (messageId) {
-        const messageUrl = `${KLAVIYO_V3_API_BASE}/campaign-messages/${messageId}`;
-        try {
-            const messageResponse = await fetch(messageUrl, {
-                headers: {
-                    'Authorization': `Klaviyo-API-Key ${apiKey}`,
-                    'Accept': 'application/json',
-                    'revision': '2023-10-15',
-                }
-            });
-            
-            if (!messageResponse.ok) {
-                 console.error(`Subject fetch failed: ${messageResponse.status}`);
-                 return { subject: null };
-            }
-
-            const messageData = await messageResponse.json();
-            // The subject line is located under data.attributes.definition.content.subject
-            const subject = messageData?.data?.attributes?.definition?.content?.subject;
-            
-            if (subject) {
-                return { subject: subject };
-            }
-        } catch (e) {
-            console.error("Failed to get message details (subject):", e.message);
-        }
-    }
-
-    return { subject: null };
-}
-
 
 // --------------------------------------------------------------------------------------
 // --- Main Export & Routing ---
@@ -159,7 +98,7 @@ return jsonResponse(res, { error: 'internal_error', details: String(err && err.m
 };
 
 // --------------------------------------------------------------------------------------
-// --- runSearchCampaigns Logic (Updated) ---
+// --- runSearchCampaigns Logic (FINALIZED) ---
 // --------------------------------------------------------------------------------------
 
 async function runSearchCampaigns(input = {}, req, res) {
@@ -176,10 +115,10 @@ if (!keyword) {
     return jsonResponse(res, { error: 'missing_parameter', details: 'keyword is required' }, 400);
 }
 
-// 1. Fetch initial campaign list using filtering (reliable)
+// 1. Fetch initial campaign list using 'include' (Most reliable V3 method)
 const filter = encodeURIComponent("and(equals(messages.channel,'email'),equals(status,'Sent'))");
-// CORRECTED: Removed invalid pagination parameter
-const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}`; 
+// 💥 NEW: Using 'include' to fetch messages in one reliable request.
+const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}&include=campaign-messages`; 
 const campaignsResp = await fetch(campaignsUrl, {
     method: 'GET',
     headers: {
@@ -198,19 +137,28 @@ if (!campaignsResp.ok) {
 const campaignsJson = safeJsonParse(campaignsText) || {};
 const rawItems = Array.isArray(campaignsJson?.data) ? campaignsJson.data : (Array.isArray(campaignsJson) ? campaignsJson : (campaignsJson?.campaigns || campaignsJson?.results || []));
 
-// 2. Add subject line lookup to the initial map (NEW LOGIC)
-const campaignPromises = (rawItems || []).map(async (item) => {
+// We need the included message data for extraction
+const includedMessages = Array.isArray(campaignsJson?.included) ? campaignsJson.included.filter(i => i.type === 'campaign-message') : [];
+
+
+// 2. Extract data (now using a single map without Promises)
+const allCampaigns = (rawItems || []).map(item => {
     const id = item.id || item?.campaign_id || item?.uid || (item?.attributes && item.attributes.id) || null;
     const attrs = item.attributes || item || {};
     const name = attrs.name || attrs.title || item.name || item.title || '';
     const created_at = attrs.created_at || attrs.created || attrs.sent_at || attrs.scheduled || item.created_at || item.sent_at || null;
 
-    // Perform the subject line lookup
-    const { subject: fetchedSubject } = await getMessageDetails(id, apiKey);
-    
     const subject_lines = [];
-    if (fetchedSubject) subject_lines.push(fetchedSubject);
-    // Retain existing subject line logic as a fallback if the lookup failed
+    // 💥 NEW: Extract subject from the 'included' section based on relationship
+    const messageRelationship = item?.relationships?.['campaign-messages']?.data?.[0];
+    if (messageRelationship) {
+        const message = includedMessages.find(i => i.id === messageRelationship.id);
+        // The subject is deeply nested in the message definition
+        const subject = message?.attributes?.definition?.content?.subject;
+        if (subject) subject_lines.push(subject);
+    }
+
+    // Keep old subject logic as fallback for any pre-V3 data
     if (Array.isArray(attrs.subject_lines)) subject_lines.push(...attrs.subject_lines.filter(Boolean));
     if (attrs.subject) subject_lines.push(attrs.subject);
     if (item.subject) subject_lines.push(item.subject);
@@ -224,16 +172,45 @@ const campaignPromises = (rawItems || []).map(async (item) => {
     };
 });
 
-const allCampaigns = await Promise.all(campaignPromises);
+const allCampaigns = (rawItems || []).map(item => {
+    const id = item.id || item?.campaign_id || item?.uid || (item?.attributes && item.attributes.id) || null;
+    const attrs = item.attributes || item || {};
+    const name = attrs.name || attrs.title || item.name || item.title || '';
+    const created_at = attrs.created_at || attrs.created || attrs.sent_at || attrs.scheduled || item.created_at || item.sent_at || null;
+
+    const subject_lines = [];
+    // 💥 NEW: Extract subject from the 'included' section based on relationship
+    const messageRelationship = item?.relationships?.['campaign-messages']?.data?.[0];
+    if (messageRelationship) {
+        const message = includedMessages.find(i => i.id === messageRelationship.id);
+        // The subject is deeply nested in the message definition
+        const subject = message?.attributes?.definition?.content?.subject;
+        if (subject) subject_lines.push(subject);
+    }
+
+    // Keep old subject logic as fallback for any pre-V3 data
+    if (Array.isArray(attrs.subject_lines)) subject_lines.push(...attrs.subject_lines.filter(Boolean));
+    if (attrs.subject) subject_lines.push(attrs.subject);
+    if (item.subject) subject_lines.push(item.subject);
+
+    return {
+      id: id ? String(id) : null,
+      name,
+      subject_lines: Array.from(new Set(subject_lines)).filter(Boolean),
+      created_at,
+      raw: item,
+    };
+});
 
 
-// 3. Apply keyword filtering (EXISTING LOGIC)
+
+// 3. Apply keyword filtering 
 const keywordLower = keyword.toLowerCase();
 const matched = allCampaigns.filter(c => {
     if (!c) return false;
     // Match on Name 
     if ((c.name || '').toLowerCase().includes(keywordLower)) return true; 
-    // Match on new subject line (this relies on the fixed lookup)
+    // Match on subject line (This is now reliable!)
     for (const s of (c.subject_lines || [])) {
       if ((s || '').toLowerCase().includes(keywordLower)) return true;
     }
@@ -245,7 +222,7 @@ const performance_metrics = [];
 const themes = [];
 const campaignsResult = [];
 
-// 4. Process matches (EXISTING LOGIC)
+// 4. Process matches 
 for (const c of matched) {
     let metrics = { open_rate: null, click_rate: null, conversion_rate: null, sent: null, revenue: null, raw: null };
     try {
