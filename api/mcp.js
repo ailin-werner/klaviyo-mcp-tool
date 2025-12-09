@@ -161,7 +161,7 @@ if (!keyword) {
 
 // 1. Fetch initial campaign list using filtering (reliable)
 const filter = encodeURIComponent("and(equals(messages.channel,'email'),equals(status,'Sent'))");
-const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}&page[size]=100`;
+const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}`;
 const campaignsResp = await fetch(campaignsUrl, {
     method: 'GET',
     headers: {
