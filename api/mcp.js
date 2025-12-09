@@ -108,7 +108,7 @@ async function getTemplateHtml(templateId, apiKey) {
 // --------------------------------------------------------------------------------------
 // --- Main Export & Routing (Defensive Body Parsing) ---
 // --------------------------------------------------------------------------------------
-
+const FIX_VERSION = 5; // FORCING VERCEL CACHE CLEAR
 module.exports = async (req, res) => {
 try {
 const urlPath = req.url || '';
