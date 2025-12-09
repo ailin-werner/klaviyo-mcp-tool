@@ -3,20 +3,17 @@ api/mcp.js
 Minimal Vercel serverless route implementing a Klaviyo helper endpoint.
 */
 
-// --- ROBUST FETCH INITIALIZATION FIX ---
-// This handles Vercel's environment where native fetch might be missing,
-// relying on the 'node-fetch' dependency which must be in package.json.
+// --- ROBUST FETCH INITIALIZATION ---
 let fetch = globalThis.fetch;
 if (!fetch) {
     try {
-        // node-fetch is required for Vercel functions to make external HTTP requests
+        // Fallback to 'node-fetch' which must be in package.json
         fetch = require('node-fetch');
     } catch (e) {
-        console.error("node-fetch dependency not found. Please ensure it's in package.json.");
+        console.error("node-fetch dependency not found.");
     }
 }
 if (fetch) {
-    // Bind fetch to ensure 'this' context is correct for older node-fetch versions
     fetch = fetch.bind(globalThis);
 }
 
@@ -52,7 +49,7 @@ function stripHtml(html) {
 }
 
 // --------------------------------------------------------------------------------------
-// --- NEW Helper Function: Clean HTML Body for Analysis (Improved Theme Generation) ---
+// --- Helper Function: Clean HTML Body for Analysis (Theme Generation) ---
 // --------------------------------------------------------------------------------------
 
 function cleanBodyForAnalysis(html) {
@@ -79,7 +76,6 @@ async function getTemplateHtml(templateId, apiKey) {
 
     const url = `${KLAVIYO_BASE}/templates/${templateId}`;
     
-    // Check if fetch is available before making the call
     if (!fetch) {
         console.error("Fetch is not defined. Cannot fetch template.");
         return '';
@@ -101,7 +97,6 @@ async function getTemplateHtml(templateId, apiKey) {
         }
         
         const json = await resp.json();
-        // The HTML content is directly under attributes.html for the Template resource
         return json?.data?.attributes?.html || '';
     } catch (err) {
         console.error(`Error fetching template ${templateId}: ${err.message}`);
@@ -111,7 +106,7 @@ async function getTemplateHtml(templateId, apiKey) {
 
 
 // --------------------------------------------------------------------------------------
-// --- Main Export & Routing ---
+// --- Main Export & Routing (Defensive Body Parsing) ---
 // --------------------------------------------------------------------------------------
 
 module.exports = async (req, res) => {
@@ -136,32 +131,42 @@ if (req.method === 'GET' && urlPath.endsWith('/tools')) {
     ]);
 }
 
+// 1. POST /execute handler
 if (req.method === 'POST' && urlPath.endsWith('/execute')) {
-    let body = req.body;
-    if (!body) {
-      const raw = await readRawBody(req);
-      try { body = JSON.parse(raw || '{}'); } catch { body = body = raw || {}; }
-    }
-    const tool = (body.tool || body.name || '').toString();
-    const input = body.input || body.args || body;
-    if (!tool || tool !== 'search_campaigns') {
-      return jsonResponse(res, { error: 'unsupported_tool', details: 'Only search_campaigns is supported' }, 400);
-    }
-    return runSearchCampaigns(input, req, res);
+    let body = req.body;
+    if (!body) {
+      const raw = await readRawBody(req);
+      try { 
+          body = JSON.parse(raw || '{}'); 
+      } catch { 
+          body = {}; // Defensive fallback
+      }
+    }
+    const tool = (body.tool || body.name || '').toString();
+    const input = body.input || body.args || body;
+    if (!tool || tool !== 'search_campaigns') {
+      return jsonResponse(res, { error: 'unsupported_tool', details: 'Only search_campaigns is supported' }, 400);
+    }
+    return runSearchCampaigns(input, req, res);
 }
 
+// 2. Generic POST handler
 if (req.method === 'POST') {
-    let body = req.body;
-    if (!body) {
-      const raw = await readRawBody(req);
-      try { body = JSON.parse(raw || '{}'); } catch { body = raw || {}; }
-    }
-    if (body && (body.tool || body.name)) {
-      const tool = (body.tool || body.name).toString();
-      const input = body.input || body.args || body;
-      if (tool === 'search_campaigns') return runSearchCampaigns(input, req, res);
-    }
-    return runSearchCampaigns(body, req, res);
+    let body = req.body;
+    if (!body) {
+      const raw = await readRawBody(req);
+      try { 
+          body = JSON.parse(raw || '{}'); 
+      } catch { 
+          body = {}; // Defensive fallback
+      }
+    }
+    if (body && (body.tool || body.name)) {
+      const tool = (body.tool || body.name).toString();
+      const input = body.input || body.args || body;
+      if (tool === 'search_campaigns') return runSearchCampaigns(input, req, res);
+    }
+    return runSearchCampaigns(body, req, res);
 }
 
 return jsonResponse(res, { message: 'MCP helper — GET /api/mcp/tools, POST /api/mcp/execute or POST /api/mcp' });
@@ -172,7 +177,7 @@ return jsonResponse(res, { error: 'internal_error', details: String(err && err.m
 };
 
 // --------------------------------------------------------------------------------------
-// --- runSearchCampaigns Logic (FINAL WORKING VERSION) ---
+// --- runSearchCampaigns Logic (Finalized) ---
 // --------------------------------------------------------------------------------------
 
 async function runSearchCampaigns(input = {}, req, res) {
@@ -188,13 +193,12 @@ if (!apiKey) {
 if (!keyword) {
     return jsonResponse(res, { error: 'missing_parameter', details: 'keyword is required' }, 400);
 }
-// Check for fetch dependency failure before making external calls
 if (!fetch) {
     return jsonResponse(res, { error: 'server_misconfigured', details: 'The \'node-fetch\' dependency is required but was not found or failed to load.' }, 500);
 }
 
 
-// 1. Fetch initial campaign list using 'include' (Corrected URL: only campaign-messages allowed)
+// 1. Fetch initial campaign list
 const filter = encodeURIComponent("and(equals(messages.channel,'email'),equals(status,'Sent'))");
 const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}&include=campaign-messages`; 
 const campaignsResp = await fetch(campaignsUrl, {
@@ -215,11 +219,10 @@ if (!campaignsResp.ok) {
 const campaignsJson = safeJsonParse(campaignsText) || {};
 const rawItems = Array.isArray(campaignsJson?.data) ? campaignsJson.data : (Array.isArray(campaignsJson) ? campaignsJson : (campaignsJson?.campaigns || campaignsJson?.results || []));
 
-// We need the included message data for extraction
 const includedMessages = Array.isArray(campaignsJson?.included) ? campaignsJson.included.filter(i => i.type === 'campaign-message') : [];
 
 
-// 2. Extract data (Collecting Template ID for later fetch)
+// 2. Extract data 
 const allCampaigns = (rawItems || []).map(item => {
     const id = item.id || item?.campaign_id || item?.uid || (item?.attributes && item.attributes.id) || null;
     const attrs = item.attributes || item || {};
@@ -228,7 +231,7 @@ const allCampaigns = (rawItems || []).map(item => {
 
     const subject_lines = [];
     let preview_text = '';
-    let template_id = null; // Store template ID for later fetching
+    let template_id = null;
     
     // Extract content from the 'included' section (Campaign Message)
     const messageRelationship = item?.relationships?.['campaign-messages']?.data?.[0];
@@ -242,11 +245,10 @@ const allCampaigns = (rawItems || []).map(item => {
         // Preview Text
         preview_text = message?.attributes?.content?.preview_text || '';
         
-        // Get Template ID to fetch body HTML later
+        // Get Template ID
         template_id = message?.relationships?.template?.data?.id || null;
     }
 
-    // Keep old subject logic as fallback for any pre-V3 data
     if (Array.isArray(attrs.subject_lines)) subject_lines.push(...attrs.subject_lines.filter(Boolean));
     if (attrs.subject) subject_lines.push(attrs.subject);
     if (item.subject) subject_lines.push(item.subject);
@@ -257,7 +259,7 @@ const allCampaigns = (rawItems || []).map(item => {
       subject_lines: Array.from(new Set(subject_lines)).filter(Boolean),
       created_at,
       preview_text,
-      template_id, // Include template ID
+      template_id,
       raw: item,
     };
 });
@@ -265,16 +267,12 @@ const allCampaigns = (rawItems || []).map(item => {
 
 // 3. Apply keyword filtering 
 const keywordLower = keyword.toLowerCase();
-// The filtering logic relies on easily available fields (name, subject, preview text)
 const matched = allCampaigns.filter(c => {
     if (!c) return false;
-    // Match on Name 
     if ((c.name || '').toLowerCase().includes(keywordLower)) return true; 
-    // Match on subject line
     for (const s of (c.subject_lines || [])) {
       if ((s || '').toLowerCase().includes(keywordLower)) return true;
     }
-    // Match on preview text
     if ((c.preview_text || '').toLowerCase().includes(keywordLower)) return true;
     return false;
 }).slice(0, limit);
@@ -287,31 +285,24 @@ const campaignsResult = [];
 // 4. Process matches and fetch metrics/HTML/Clean Content
 for (const c of matched) {
     
-    // --- A. Fetch Template HTML (Separate API Call) ---
+    // --- A. Fetch Template HTML ---
     const body_html = await getTemplateHtml(c.template_id, apiKey);
     
-    // --- B. Extract Plain Text and CTA Text/Link (Using the new cleanBodyForAnalysis) ---
+    // --- B. Extract Plain Text and CTA Text/Link ---
     const body_text = cleanBodyForAnalysis(body_html);
     let cta_text = null;
     let cta_link = null;
     
-    // Simple regex to find text inside the Klaviyo button tag (<p> inside the kl-button table)
-    // This is robust for typical Klaviyo block structure
     const ctaMatch = body_html.match(/<td[^>]*class=\"kl-button\"[^>]*>.*?<p[^>]*>([^<]+)<\/p>/is);
     if (ctaMatch && ctaMatch[1]) {
-        // Clean up the CTA text from extra whitespace and characters
         cta_text = stripHtml(ctaMatch[1]).trim(); 
         
-        // Targeted search for the link within the button's wrapper (assuming the button is an <a> tag)
-        // This is tricky as Klaviyo often nests the link inside a table structure.
-        // We look for the nearest <a> tag with an href attribute.
         const ctaButtonHtml = body_html.substring(body_html.indexOf(ctaMatch[0]));
         const linkMatch = ctaButtonHtml.match(/<a[^>]*href=\"([^\"]+)\"[^>]*>/is);
         
         if (linkMatch && linkMatch[1]) {
             cta_link = linkMatch[1].trim();
         } else {
-             // Fallback: search for the first link in the main content area for the CTA
              const contentAreaMatch = body_html.match(/<div class=\"content-padding.*?>([\s\S]*?)<\/div>/i);
              if (contentAreaMatch && contentAreaMatch[1]) {
                  const broaderLinkMatch = contentAreaMatch[1].match(/<a[^>]*href=\"([^\"]+)\"[^>]*>/i);
@@ -340,7 +331,7 @@ for (const c of matched) {
       if (metricsResp.ok) {
         const mJson = safeJsonParse(metricsText) || {};
         
-        // 🟢 FIX: Using '||' instead of '??' for broader Node.js compatibility
+        // Using '||' for universal Node.js compatibility (fixes '??' syntax crash)
         const open_val = mJson.open_rate || mJson.open_rate_pct || null;
         const click_val = mJson.click_rate || mJson.click_rate_pct || null;
         const conv_val = mJson.conversion_rate || mJson.conversion_rate_pct || null;
@@ -349,7 +340,6 @@ for (const c of matched) {
         const revenue_val = mJson.revenue || mJson.total_revenue || null;
         
         metrics = {
-          // Ensure explicit check for null/undefined before casting to Number
           open_rate: open_val !== undefined && open_val !== null ? Number(open_val) : null,
           click_rate: click_val !== undefined && click_val !== null ? Number(click_val) : null,
           conversion_rate: conv_val !== undefined && conv_val !== null ? Number(conv_val) : null,
@@ -360,14 +350,12 @@ for (const c of matched) {
       }
     } catch (e) {}
 
-    // --- D. Theme Generation (Using clean text) ---
+    // --- D. Theme Generation ---
     const textToAnalyze = [c.name, c.preview_text].concat(c.subject_lines || []).join(' ') + ' ' + body_text;
     const tokens = textToAnalyze.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-    // Filter out generic short words and common structural/stop words
     const stopWords = new Set(['the', 'and', 'for', 'you', 'with', 'to', 'of', 'in', 'on', 'at', 'is', 'it', 'from', 'by', 'as', 'we', 'i', 'a', 'an', 'only', 'out', 'up', 'down', 'here', 'now', 'or', 'your', 'us', 'our', 'what', 'day']);
     const freq = {};
     tokens.forEach(t => { 
-        // Also exclude words common in email footers/branding but not content (like unsubscribe/klaviyo)
         if (t.length > 2 && !stopWords.has(t) && !t.includes('klaviyo') && !t.includes('unsubscribe')) {
              freq[t] = (freq[t] || 0) + 1; 
         }
@@ -396,9 +384,7 @@ for (const c of matched) {
       subject_lines: c.subject_lines,
       sent_at: c.created_at,
       preview_text: c.preview_text,
-      // Retaining the full HTML as originally requested
       body_html: body_html, 
-      // NEW CLEANED FIELDS for easy consumption
       body_text: body_text,
       cta_text: cta_text,
       cta_link: cta_link, 
