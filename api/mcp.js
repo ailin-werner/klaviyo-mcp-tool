@@ -52,7 +52,7 @@ function stripHtml(html) {
 // --- Helper Function: Clean HTML Body for Analysis (Theme Generation) ---
 // --------------------------------------------------------------------------------------
 
-function cleanBodyForAnalysis(html) {
+function cleanBodyForAnalysis(html) { // <-- Function start
     if (!html) return '';
 
     // 1. Remove all content inside <style>...</style> and <script>...</script> tags
@@ -64,7 +64,7 @@ function cleanBodyForAnalysis(html) {
 
     // 3. Remove most remaining HTML tags and collapse whitespace
     return stripHtml(cleaned);
-} // <--- SYNTAX FIX: Ensure this closing brace is present!
+} // <-- SYNTAX FIX: This is the critical closing brace on line ~69.
 
 
 // --------------------------------------------------------------------------------------
