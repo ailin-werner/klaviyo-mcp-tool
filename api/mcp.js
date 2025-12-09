@@ -31,6 +31,17 @@ req.on('error', (e) => reject(e));
 }
 
 // --------------------------------------------------------------------------------------
+// --- Helper Function: Strip HTML Tags ---
+// --------------------------------------------------------------------------------------
+
+function stripHtml(html) {
+    if (!html) return '';
+    // Removes most HTML tags and converts multiple spaces/newlines into a single space
+    return html.replace(/<[^>]*>?/gm, ' ').replace(/\s\s+/g, ' ').trim();
+}
+
+
+// --------------------------------------------------------------------------------------
 // --- Helper Function: Fetch Template HTML ---
 // --------------------------------------------------------------------------------------
 
@@ -143,9 +154,8 @@ if (!keyword) {
     return jsonResponse(res, { error: 'missing_parameter', details: 'keyword is required' }, 400);
 }
 
-// 1. Fetch initial campaign list using 'include' (Corrected URL)
+// 1. Fetch initial campaign list using 'include' (Corrected URL: only campaign-messages allowed)
 const filter = encodeURIComponent("and(equals(messages.channel,'email'),equals(status,'Sent'))");
-// Reverting to only include campaign-messages to fix the 400 error
 const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}&include=campaign-messages`; 
 const campaignsResp = await fetch(campaignsUrl, {
     method: 'GET',
@@ -169,7 +179,7 @@ const rawItems = Array.isArray(campaignsJson?.data) ? campaignsJson.data : (Arra
 const includedMessages = Array.isArray(campaignsJson?.included) ? campaignsJson.included.filter(i => i.type === 'campaign-message') : [];
 
 
-// 2. Extract data 
+// 2. Extract data (Collecting Template ID for later fetch)
 const allCampaigns = (rawItems || []).map(item => {
     const id = item.id || item?.campaign_id || item?.uid || (item?.attributes && item.attributes.id) || null;
     const attrs = item.attributes || item || {};
@@ -215,7 +225,7 @@ const allCampaigns = (rawItems || []).map(item => {
 
 // 3. Apply keyword filtering 
 const keywordLower = keyword.toLowerCase();
-// The filtering logic won't use body_html yet, as it's not fetched
+// The filtering logic relies on easily available fields (name, subject, preview text)
 const matched = allCampaigns.filter(c => {
     if (!c) return false;
     // Match on Name 
@@ -224,6 +234,8 @@ const matched = allCampaigns.filter(c => {
     for (const s of (c.subject_lines || [])) {
       if ((s || '').toLowerCase().includes(keywordLower)) return true;
     }
+    // Match on preview text
+    if ((c.preview_text || '').toLowerCase().includes(keywordLower)) return true;
     return false;
 }).slice(0, limit);
 
@@ -232,13 +244,32 @@ const performance_metrics = [];
 const themes = [];
 const campaignsResult = [];
 
-// 4. Process matches and fetch metrics/HTML (New: Fetch HTML in this loop)
+// 4. Process matches and fetch metrics/HTML/Clean Content
 for (const c of matched) {
     
-    // --- A. Fetch Template HTML (New) ---
+    // --- A. Fetch Template HTML (Separate API Call) ---
     const body_html = await getTemplateHtml(c.template_id, apiKey);
     
-    // --- B. Fetch Metrics ---
+    // --- B. Extract Plain Text and CTA Text/Link ---
+    const body_text = stripHtml(body_html);
+    let cta_text = null;
+    let cta_link = null;
+    
+    // Simple regex to find text inside the Klaviyo button tag (<p> inside the kl-button table)
+    // This is robust for typical Klaviyo block structure
+    const ctaMatch = body_html.match(/<td[^>]*class=\"kl-button\"[^>]*>.*?<p[^>]*>([^<]+)<\/p>/is);
+    if (ctaMatch && ctaMatch[1]) {
+        // Clean up the CTA text from extra whitespace and characters
+        cta_text = stripHtml(ctaMatch[1]).trim(); 
+        
+        // Simple regex to find the primary link near the button text
+        const linkMatch = body_html.match(/<a[^>]*href=\"([^\"]+)\"[^>]*>.*?<\/a>/is);
+        if (linkMatch && linkMatch[1]) {
+            cta_link = linkMatch[1].trim();
+        }
+    }
+    
+    // --- C. Fetch Metrics ---
     let metrics = { open_rate: null, click_rate: null, conversion_rate: null, sent: null, revenue: null, raw: null };
     try {
       const metricsUrl = KLAVIYO_BASE + '/campaign-values-reports/'; 
@@ -271,9 +302,8 @@ for (const c of matched) {
       }
     } catch (e) {}
 
-    // --- C. Theme Generation ---
-    // Theme generation now includes subject/preview text
-    const textToAnalyze = [c.name].concat(c.subject_lines || []).concat(c.preview_text || []).join(' ').toLowerCase();
+    // --- D. Theme Generation (Using clean text) ---
+    const textToAnalyze = [c.name, c.preview_text, body_text].concat(c.subject_lines || []).join(' ').toLowerCase();
     const tokens = textToAnalyze.split(/[^a-z0-9]+/).filter(Boolean);
     const freq = {};
     tokens.forEach(t => { if (t.length > 2) freq[t] = (freq[t] || 0) + 1; });
@@ -300,7 +330,12 @@ for (const c of matched) {
       subject_lines: c.subject_lines,
       sent_at: c.created_at,
       preview_text: c.preview_text,
-      body_html: body_html, // Now populated from the separate API call
+      // Retaining the full HTML as originally requested
+      body_html: body_html, 
+      // NEW CLEANED FIELDS for easy consumption
+      body_text: body_text,
+      cta_text: cta_text,
+      cta_link: cta_link, 
       metrics: metrics.raw || null,
       themes: topThemes,
     });
