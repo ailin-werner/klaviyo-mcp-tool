@@ -6,15 +6,15 @@ Minimal Vercel serverless route implementing a Klaviyo helper endpoint.
 // --- ROBUST FETCH INITIALIZATION ---
 let fetch = globalThis.fetch;
 if (!fetch) {
-    try {
-        // Fallback to 'node-fetch' which must be in package.json
-        fetch = require('node-fetch');
-    } catch (e) {
-        console.error("node-fetch dependency not found.");
-    }
+    try {
+        // Fallback to 'node-fetch' which must be in package.json
+        fetch = require('node-fetch');
+    } catch (e) {
+        console.error("node-fetch dependency not found.");
+    }
 }
 if (fetch) {
-    fetch = fetch.bind(globalThis);
+    fetch = fetch.bind(globalThis);
 }
 
 const KLAVIYO_BASE = 'https://a.klaviyo.com/api';
@@ -43,9 +43,9 @@ req.on('error', (e) => reject(e));
 // --------------------------------------------------------------------------------------
 
 function stripHtml(html) {
-    if (!html) return '';
-    // Removes most HTML tags and converts multiple spaces/newlines into a single space
-    return html.replace(/<[^>]*>?/gm, ' ').replace(/\s\s+/g, ' ').trim();
+    if (!html) return '';
+    // Removes most HTML tags and converts multiple spaces/newlines into a single space
+    return html.replace(/<[^>]*>?/gm, ' ').replace(/\s\s+/g, ' ').trim();
 }
 
 // --------------------------------------------------------------------------------------
@@ -53,18 +53,18 @@ function stripHtml(html) {
 // --------------------------------------------------------------------------------------
 
 function cleanBodyForAnalysis(html) {
-    if (!html) return '';
+    if (!html) return '';
 
-    // 1. Remove all content inside <style>...</style> and <script>...</script> tags
-    let cleaned = html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
-    cleaned = cleaned.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ');
-    
-    // 2. Remove all HTML comments (which often contain MSO/IE specific CSS noise)
-    cleaned = cleaned.replace(//g, ' ');
+    // 1. Remove all content inside <style>...</style> and <script>...</script> tags
+    let cleaned = html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
+    cleaned = cleaned.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ');
+    
+    // 2. Remove all HTML comments (which often contain MSO/IE specific CSS noise)
+    cleaned = cleaned.replace(//g, ' '); // <-- THIS LINE IS NOW CORRECTED!
 
-    // 3. Remove most remaining HTML tags and collapse whitespace
-    return stripHtml(cleaned);
-} 
+    // 3. Remove most remaining HTML tags and collapse whitespace
+    return stripHtml(cleaned);
+} // <--- Closing brace is correctly present.
 
 
 // --------------------------------------------------------------------------------------
@@ -72,36 +72,36 @@ function cleanBodyForAnalysis(html) {
 // --------------------------------------------------------------------------------------
 
 async function getTemplateHtml(templateId, apiKey) {
-    if (!templateId || !apiKey) return '';
+    if (!templateId || !apiKey) return '';
 
-    const url = `${KLAVIYO_BASE}/templates/${templateId}`;
-    
-    if (!fetch) {
-        console.error("Fetch is not defined. Cannot fetch template.");
-        return '';
-    }
+    const url = `${KLAVIYO_BASE}/templates/${templateId}`;
+    
+    if (!fetch) {
+        console.error("Fetch is not defined. Cannot fetch template.");
+        return '';
+    }
 
-    try {
-        const resp = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'Authorization': 'Klaviyo-API-Key ' + String(apiKey),
-                'revision': '2023-10-15', 
-            },
-        });
+    try {
+        const resp = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'Authorization': 'Klaviyo-API-Key ' + String(apiKey),
+                'revision': '2023-10-15', 
+            },
+        });
 
-        if (!resp.ok) {
-            console.error(`Failed to fetch template ${templateId}: ${resp.status}`);
-            return '';
-        }
-        
-        const json = await resp.json();
-        return json?.data?.attributes?.html || '';
-    } catch (err) {
-        console.error(`Error fetching template ${templateId}: ${err.message}`);
-        return '';
-    }
+        if (!resp.ok) {
+            console.error(`Failed to fetch template ${templateId}: ${resp.status}`);
+            return '';
+        }
+        
+        const json = await resp.json();
+        return json?.data?.attributes?.html || '';
+    } catch (err) {
+        console.error(`Error fetching template ${templateId}: ${err.message}`);
+        return '';
+    }
 }
 
 
@@ -133,40 +133,40 @@ if (req.method === 'GET' && urlPath.endsWith('/tools')) {
 
 // 1. POST /execute handler
 if (req.method === 'POST' && urlPath.endsWith('/execute')) {
-    let body = req.body;
-    if (!body) {
-      const raw = await readRawBody(req);
-      try { 
-          body = JSON.parse(raw || '{}'); 
-      } catch { 
-          body = {}; // Defensive fallback
-      }
-    }
-    const tool = (body.tool || body.name || '').toString();
-    const input = body.input || body.args || body;
-    if (!tool || tool !== 'search_campaigns') {
-      return jsonResponse(res, { error: 'unsupported_tool', details: 'Only search_campaigns is supported' }, 400);
-    }
-    return runSearchCampaigns(input, req, res);
+    let body = req.body;
+    if (!body) {
+      const raw = await readRawBody(req);
+      try { 
+          body = JSON.parse(raw || '{}'); 
+      } catch { 
+          body = {}; // Defensive fallback
+      }
+    }
+    const tool = (body.tool || body.name || '').toString();
+    const input = body.input || body.args || body;
+    if (!tool || tool !== 'search_campaigns') {
+      return jsonResponse(res, { error: 'unsupported_tool', details: 'Only search_campaigns is supported' }, 400);
+    }
+    return runSearchCampaigns(input, req, res);
 }
 
 // 2. Generic POST handler
 if (req.method === 'POST') {
-    let body = req.body;
-    if (!body) {
-      const raw = await readRawBody(req);
-      try { 
-          body = JSON.parse(raw || '{}'); 
-      } catch { 
-          body = {}; // Defensive fallback
-      }
-    }
-    if (body && (body.tool || body.name)) {
-      const tool = (body.tool || body.name).toString();
-      const input = body.input || body.args || body;
-      if (tool === 'search_campaigns') return runSearchCampaigns(input, req, res);
-    }
-    return runSearchCampaigns(body, req, res);
+    let body = req.body;
+    if (!body) {
+      const raw = await readRawBody(req);
+      try { 
+          body = JSON.parse(raw || '{}'); 
+      } catch { 
+          body = {}; // Defensive fallback
+      }
+    }
+    if (body && (body.tool || body.name)) {
+      const tool = (body.tool || body.name).toString();
+      const input = body.input || body.args || body;
+      if (tool === 'search_campaigns') return runSearchCampaigns(input, req, res);
+    }
+    return runSearchCampaigns(body, req, res);
 }
 
 return jsonResponse(res, { message: 'MCP helper — GET /api/mcp/tools, POST /api/mcp/execute or POST /api/mcp' });
@@ -194,7 +194,7 @@ if (!keyword) {
     return jsonResponse(res, { error: 'missing_parameter', details: 'keyword is required' }, 400);
 }
 if (!fetch) {
-    return jsonResponse(res, { error: 'server_misconfigured', details: 'The \'node-fetch\' dependency is required but was not found or failed to load.' }, 500);
+    return jsonResponse(res, { error: 'server_misconfigured', details: 'The \'node-fetch\' dependency is required but was not found or failed to load.' }, 500);
 }
 
 
@@ -222,7 +222,7 @@ const rawItems = Array.isArray(campaignsJson?.data) ? campaignsJson.data : (Arra
 const includedMessages = Array.isArray(campaignsJson?.included) ? campaignsJson.included.filter(i => i.type === 'campaign-message') : [];
 
 
-// 2. Extract data 
+// 2. Extract data 
 const allCampaigns = (rawItems || []).map(item => {
     const id = item.id || item?.campaign_id || item?.uid || (item?.attributes && item.attributes.id) || null;
     const attrs = item.attributes || item || {};
@@ -232,21 +232,21 @@ const allCampaigns = (rawItems || []).map(item => {
     const subject_lines = [];
     let preview_text = '';
     let template_id = null;
-    
+    
     // Extract content from the 'included' section (Campaign Message)
     const messageRelationship = item?.relationships?.['campaign-messages']?.data?.[0];
     if (messageRelationship) {
         const message = includedMessages.find(i => i.id === messageRelationship.id);
-        
-        // Subject Line
-        const subject = message?.attributes?.content?.subject || message?.attributes?.definition?.content?.subject; 
+        
+        // Subject Line
+        const subject = message?.attributes?.content?.subject || message?.attributes?.definition?.content?.subject; 
         if (subject) subject_lines.push(subject);
-        
-        // Preview Text
-        preview_text = message?.attributes?.content?.preview_text || '';
-        
-        // Get Template ID
-        template_id = message?.relationships?.template?.data?.id || null;
+        
+        // Preview Text
+        preview_text = message?.attributes?.content?.preview_text || '';
+        
+        // Get Template ID
+        template_id = message?.relationships?.template?.data?.id || null;
     }
 
     if (Array.isArray(attrs.subject_lines)) subject_lines.push(...attrs.subject_lines.filter(Boolean));
@@ -258,8 +258,8 @@ const allCampaigns = (rawItems || []).map(item => {
       name,
       subject_lines: Array.from(new Set(subject_lines)).filter(Boolean),
       created_at,
-      preview_text,
-      template_id,
+      preview_text,
+      template_id,
       raw: item,
     };
 });
@@ -273,7 +273,7 @@ const matched = allCampaigns.filter(c => {
     for (const s of (c.subject_lines || [])) {
       if ((s || '').toLowerCase().includes(keywordLower)) return true;
     }
-    if ((c.preview_text || '').toLowerCase().includes(keywordLower)) return true;
+    if ((c.preview_text || '').toLowerCase().includes(keywordLower)) return true;
     return false;
 }).slice(0, limit);
 
@@ -284,35 +284,35 @@ const campaignsResult = [];
 
 // 4. Process matches and fetch metrics/HTML/Clean Content
 for (const c of matched) {
-    
+    
     // --- A. Fetch Template HTML ---
-    const body_html = await getTemplateHtml(c.template_id, apiKey);
-    
-    // --- B. Extract Plain Text and CTA Text/Link ---
-    const body_text = cleanBodyForAnalysis(body_html);
-    let cta_text = null;
-    let cta_link = null;
-    
-    const ctaMatch = body_html.match(/<td[^>]*class=\"kl-button\"[^>]*>.*?<p[^>]*>([^<]+)<\/p>/is);
-    if (ctaMatch && ctaMatch[1]) {
-        cta_text = stripHtml(ctaMatch[1]).trim(); 
-        
-        const ctaButtonHtml = body_html.substring(body_html.indexOf(ctaMatch[0]));
-        const linkMatch = ctaButtonHtml.match(/<a[^>]*href=\"([^\"]+)\"[^>]*>/is);
-        
-        if (linkMatch && linkMatch[1]) {
-            cta_link = linkMatch[1].trim();
-        } else {
-             const contentAreaMatch = body_html.match(/<div class=\"content-padding.*?>([\s\S]*?)<\/div>/i);
-             if (contentAreaMatch && contentAreaMatch[1]) {
-                 const broaderLinkMatch = contentAreaMatch[1].match(/<a[^>]*href=\"([^\"]+)\"[^>]*>/i);
-                 if (broaderLinkMatch && broaderLinkMatch[1]) {
-                     cta_link = broaderLinkMatch[1].trim();
-                 }
-             }
-        }
-    }
-    
+    const body_html = await getTemplateHtml(c.template_id, apiKey);
+    
+    // --- B. Extract Plain Text and CTA Text/Link ---
+    const body_text = cleanBodyForAnalysis(body_html);
+    let cta_text = null;
+    let cta_link = null;
+    
+    const ctaMatch = body_html.match(/<td[^>]*class=\"kl-button\"[^>]*>.*?<p[^>]*>([^<]+)<\/p>/is);
+    if (ctaMatch && ctaMatch[1]) {
+        cta_text = stripHtml(ctaMatch[1]).trim(); 
+        
+        const ctaButtonHtml = body_html.substring(body_html.indexOf(ctaMatch[0]));
+        const linkMatch = ctaButtonHtml.match(/<a[^>]*href=\"([^\"]+)\"[^>]*>/is);
+        
+        if (linkMatch && linkMatch[1]) {
+            cta_link = linkMatch[1].trim();
+        } else {
+             const contentAreaMatch = body_html.match(/<div class=\"content-padding.*?>([\s\S]*?)<\/div>/i);
+             if (contentAreaMatch && contentAreaMatch[1]) {
+                 const broaderLinkMatch = contentAreaMatch[1].match(/<a[^>]*href=\"([^\"]+)\"[^>]*>/i);
+                 if (broaderLinkMatch && broaderLinkMatch[1]) {
+                     cta_link = broaderLinkMatch[1].trim();
+                 }
+             }
+        }
+    }
+    
     // --- C. Fetch Metrics ---
     let metrics = { open_rate: null, click_rate: null, conversion_rate: null, sent: null, revenue: null, raw: null };
     try {
@@ -330,15 +330,15 @@ for (const c of matched) {
       const metricsText = await metricsResp.text();
       if (metricsResp.ok) {
         const mJson = safeJsonParse(metricsText) || {};
-        
-        // Using '||' for universal Node.js compatibility
+        
+        // Using '||' for universal Node.js compatibility
         const open_val = mJson.open_rate || mJson.open_rate_pct || null;
         const click_val = mJson.click_rate || mJson.click_rate_pct || null;
         const conv_val = mJson.conversion_rate || mJson.conversion_rate_pct || null;
-        
+        
         const sent_val = mJson.recipients || mJson.number_sent || mJson.sent || null;
         const revenue_val = mJson.revenue || mJson.total_revenue || null;
-        
+        
         metrics = {
           open_rate: open_val !== undefined && open_val !== null ? Number(open_val) : null,
           click_rate: click_val !== undefined && click_val !== null ? Number(click_val) : null,
@@ -353,16 +353,16 @@ for (const c of matched) {
     // --- D. Theme Generation ---
     const textToAnalyze = [c.name, c.preview_text].concat(c.subject_lines || []).join(' ') + ' ' + body_text;
     const tokens = textToAnalyze.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-    const stopWords = new Set(['the', 'and', 'for', 'you', 'with', 'to', 'of', 'in', 'on', 'at', 'is', 'it', 'from', 'by', 'as', 'we', 'i', 'a', 'an', 'only', 'out', 'up', 'down', 'here', 'now', 'or', 'your', 'us', 'our', 'what', 'day']);
+    const stopWords = new Set(['the', 'and', 'for', 'you', 'with', 'to', 'of', 'in', 'on', 'at', 'is', 'it', 'from', 'by', 'as', 'we', 'i', 'a', 'an', 'only', 'out', 'up', 'down', 'here', 'now', 'or', 'your', 'us', 'our', 'what', 'day']);
     const freq = {};
-    tokens.forEach(t => { 
-        if (t.length > 2 && !stopWords.has(t) && !t.includes('klaviyo') && !t.includes('unsubscribe')) {
-             freq[t] = (freq[t] || 0) + 1; 
-        }
-    });
-    
-    const topThemes = Object.keys(freq).sort((a,b) => freq[b] - freq[a]).slice(0, 5); 
-    
+    tokens.forEach(t => { 
+        if (t.length > 2 && !stopWords.has(t) && !t.includes('klaviyo') && !t.includes('unsubscribe')) {
+             freq[t] = (freq[t] || 0) + 1; 
+        }
+    });
+    
+    const topThemes = Object.keys(freq).sort((a,b) => freq[b] - freq[a]).slice(0, 5); 
+    
     for (const subj of (c.subject_lines || [])) {
       subject_lines.push({ campaign_id: c.id, subject: subj });
     }
@@ -383,11 +383,11 @@ for (const c of matched) {
       name: c.name,
       subject_lines: c.subject_lines,
       sent_at: c.created_at,
-      preview_text: c.preview_text,
-      body_html: body_html, 
-      body_text: body_text,
-      cta_text: cta_text,
-      cta_link: cta_link, 
+      preview_text: c.preview_text,
+      body_html: body_html, 
+      body_text: body_text,
+      cta_text: cta_text,
+      cta_link: cta_link, 
       metrics: metrics.raw || null,
       themes: topThemes,
     });
