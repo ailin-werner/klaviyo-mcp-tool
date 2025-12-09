@@ -140,7 +140,7 @@ if (req.method === 'POST' && urlPath.endsWith('/execute')) {
     let body = req.body;
     if (!body) {
       const raw = await readRawBody(req);
-      try { body = JSON.parse(raw || '{}'); } catch { body = raw || {}; }
+      try { body = JSON.parse(raw || '{}'); } catch { body = body = raw || {}; }
     }
     const tool = (body.tool || body.name || '').toString();
     const input = body.input || body.args || body;
@@ -339,12 +339,17 @@ for (const c of matched) {
       const metricsText = await metricsResp.text();
       if (metricsResp.ok) {
         const mJson = safeJsonParse(metricsText) || {};
-        const open_val = (mJson.open_rate ?? mJson.open_rate_pct ?? null);
-        const click_val = (mJson.click_rate ?? mJson.click_rate_pct ?? null);
-        const conv_val = (mJson.conversion_rate ?? mJson.conversion_rate_pct ?? null);
-        const sent_val = (mJson.recipients ?? mJson.number_sent ?? mJson.sent ?? null);
-        const revenue_val = (mJson.revenue ?? mJson.total_revenue ?? null);
+        
+        // 🟢 FIX: Using '||' instead of '??' for broader Node.js compatibility
+        const open_val = mJson.open_rate || mJson.open_rate_pct || null;
+        const click_val = mJson.click_rate || mJson.click_rate_pct || null;
+        const conv_val = mJson.conversion_rate || mJson.conversion_rate_pct || null;
+        
+        const sent_val = mJson.recipients || mJson.number_sent || mJson.sent || null;
+        const revenue_val = mJson.revenue || mJson.total_revenue || null;
+        
         metrics = {
+          // Ensure explicit check for null/undefined before casting to Number
           open_rate: open_val !== undefined && open_val !== null ? Number(open_val) : null,
           click_rate: click_val !== undefined && click_val !== null ? Number(click_val) : null,
           conversion_rate: conv_val !== undefined && conv_val !== null ? Number(conv_val) : null,
