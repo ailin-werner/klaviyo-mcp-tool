@@ -49,7 +49,7 @@ function stripHtml(html) {
 }
 
 // --------------------------------------------------------------------------------------
-// --- Helper Function: Clean HTML Body for Analysis (Theme Generation) ---
+// --- Helper Function: Clean HTML Body for Analysis (FIX 05: Force Vercel Refresh) ---
 // --------------------------------------------------------------------------------------
 
 function cleanBodyForAnalysis(html) { // <-- Function start
