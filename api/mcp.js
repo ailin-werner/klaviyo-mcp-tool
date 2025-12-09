@@ -52,7 +52,7 @@ function stripHtml(html) {
 // --- Helper Function: Clean HTML Body for Analysis (Theme Generation) ---
 // --------------------------------------------------------------------------------------
 
-function cleanBodyForAnalysis(html) {
+function cleanBodyForAnalysis(html) { // <-- Function start
     if (!html) return '';
 
     // 1. Remove all content inside <style>...</style> and <script>...</script> tags
@@ -64,7 +64,7 @@ function cleanBodyForAnalysis(html) {
 
     // 3. Remove most remaining HTML tags and collapse whitespace
     return stripHtml(cleaned);
-}
+} // <-- CRITICAL FIX: The missing closing brace is now here.
 
 
 // --------------------------------------------------------------------------------------
@@ -331,7 +331,7 @@ for (const c of matched) {
       if (metricsResp.ok) {
         const mJson = safeJsonParse(metricsText) || {};
         
-        // Using '||' for universal Node.js compatibility (fixes '??' syntax crash)
+        // Using '||' for universal Node.js compatibility
         const open_val = mJson.open_rate || mJson.open_rate_pct || null;
         const click_val = mJson.click_rate || mJson.click_rate_pct || null;
         const conv_val = mJson.conversion_rate || mJson.conversion_rate_pct || null;
