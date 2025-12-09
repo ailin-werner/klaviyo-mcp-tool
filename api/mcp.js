@@ -31,13 +31,31 @@ req.on('error', (e) => reject(e));
 }
 
 // --------------------------------------------------------------------------------------
-// --- Helper Function: Strip HTML Tags ---
+// --- Helper Function: Strip HTML Tags (Original) ---
 // --------------------------------------------------------------------------------------
 
 function stripHtml(html) {
     if (!html) return '';
     // Removes most HTML tags and converts multiple spaces/newlines into a single space
     return html.replace(/<[^>]*>?/gm, ' ').replace(/\s\s+/g, ' ').trim();
+}
+
+// --------------------------------------------------------------------------------------
+// --- NEW Helper Function: Clean HTML Body for Analysis ---
+// --------------------------------------------------------------------------------------
+
+function cleanBodyForAnalysis(html) {
+    if (!html) return '';
+
+    // 1. Remove all content inside <style>...</style> and <script>...</script> tags
+    let cleaned = html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
+    cleaned = cleaned.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ');
+    
+    // 2. Remove all HTML comments (which often contain MSO/IE specific CSS noise)
+    cleaned = cleaned.replace(//g, ' ');
+
+    // 3. Remove most remaining HTML tags and collapse whitespace
+    return stripHtml(cleaned);
 }
 
 
@@ -250,8 +268,8 @@ for (const c of matched) {
     // --- A. Fetch Template HTML (Separate API Call) ---
     const body_html = await getTemplateHtml(c.template_id, apiKey);
     
-    // --- B. Extract Plain Text and CTA Text/Link ---
-    const body_text = stripHtml(body_html);
+    // --- B. Extract Plain Text and CTA Text/Link (Using the new cleanBodyForAnalysis) ---
+    const body_text = cleanBodyForAnalysis(body_html); // <--- CHANGE HERE
     let cta_text = null;
     let cta_link = null;
     
@@ -263,9 +281,16 @@ for (const c of matched) {
         cta_text = stripHtml(ctaMatch[1]).trim(); 
         
         // Simple regex to find the primary link near the button text
-        const linkMatch = body_html.match(/<a[^>]*href=\"([^\"]+)\"[^>]*>.*?<\/a>/is);
+        // Need to be a bit more robust here, looking for the nearest <a> tag with an href
+        const linkMatch = body_html.match(/<a[^>]*href=\"([^\"]+)\"[^>]*>.*?Shop Now.*?<\/a>/is); // Targeted search for the Shop Now button link
         if (linkMatch && linkMatch[1]) {
             cta_link = linkMatch[1].trim();
+        } else {
+             // Fallback: search for any link in the vicinity of the button text
+             const broaderLinkMatch = body_html.match(/<a[^>]*href=\"([^\"]+)\"[^>]*>/i);
+             if (broaderLinkMatch && broaderLinkMatch[1]) {
+                 cta_link = broaderLinkMatch[1].trim();
+             }
         }
     }
     
@@ -303,12 +328,19 @@ for (const c of matched) {
     } catch (e) {}
 
     // --- D. Theme Generation (Using clean text) ---
-    const textToAnalyze = [c.name, c.preview_text, body_text].concat(c.subject_lines || []).join(' ').toLowerCase();
-    const tokens = textToAnalyze.split(/[^a-z0-9]+/).filter(Boolean);
+    const textToAnalyze = [c.name, c.preview_text].concat(c.subject_lines || []).join(' ') + ' ' + body_text;
+    const tokens = textToAnalyze.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    // Filter out generic short words common in email structures (like 'to', 'the', 'for', 'in', 'out', 'up', 'td', 'tr', 'div', etc.)
+    const stopWords = new Set(['the', 'and', 'for', 'you', 'with', 'td', 'tr', 'div', 'p', 'kl', 'mj', 'to', 'of', 'in', 'on', 'at', 'is', 'it', 'from', 'by', 'as', 'we', 'i', 'a', 'an', 'only', 'out', 'up', 'down', 'here', 'now']);
     const freq = {};
-    tokens.forEach(t => { if (t.length > 2) freq[t] = (freq[t] || 0) + 1; });
-    const topThemes = Object.keys(freq).sort((a,b) => freq[b] - freq[a]).slice(0, 5);
-
+    tokens.forEach(t => { 
+        if (t.length > 2 && !stopWords.has(t)) {
+             freq[t] = (freq[t] || 0) + 1; 
+        }
+    });
+    
+    const topThemes = Object.keys(freq).sort((a,b) => freq[b] - freq[a]).slice(0, 5); // Now theme analysis is based on cleaned text
+    
     for (const subj of (c.subject_lines || [])) {
       subject_lines.push({ campaign_id: c.id, subject: subj });
     }
