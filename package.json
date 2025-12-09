@@ -11,6 +11,9 @@
   },
   "engines": {
     "node": "24.x"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0"
   }
 }
 
