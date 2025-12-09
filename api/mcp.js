@@ -190,7 +190,7 @@ async function runSearchCampaigns(input = {}, req, res) {
 
     // 1) Fetch campaigns (channel=email, status=Sent), include messages so we can extract subject/preview
     const filter = encodeURIComponent("and(equals(messages.channel,'email'),equals(status,'Sent'))");
-    const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}&include=campaign-messages&page[size]=100`;
+    const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}&include=campaign-messages`;
     const campaignsResp = await fetchFunc(campaignsUrl, {
       method: 'GET',
       headers: {
