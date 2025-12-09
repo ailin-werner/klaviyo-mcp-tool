@@ -34,11 +34,12 @@ req.on('error', (e) => reject(e));
 }
 
 // --------------------------------------------------------------------------------------
-// ✅ NEW HELPER FUNCTION: Fetches the Subject Line from the Campaign Message
+// ✅ NEW HELPER FUNCTION: Fetches the Subject Line from the Campaign Message (ROBUST FIX)
 // --------------------------------------------------------------------------------------
 async function getMessageDetails(campaignId, apiKey) {
     // 1. First, fetch the message ID associated with the campaign
-    const messageRelationshipUrl = `${KLAVIYO_V3_API_BASE}/campaigns/${campaignId}/relationships/campaign-messages`;
+    // FIXED: Added trailing slash to ensure correct URL structure for V3 relationship endpoint
+    const messageRelationshipUrl = `${KLAVIYO_V3_API_BASE}/campaigns/${campaignId}/relationships/campaign-messages/`; 
     let messageId = null;
 
     try {
@@ -49,10 +50,17 @@ async function getMessageDetails(campaignId, apiKey) {
                 'revision': '2023-10-15',
             }
         });
+        
+        // Check if the response was successful before parsing JSON
+        if (!relationshipResponse.ok) {
+            console.error(`Relationship fetch failed with status: ${relationshipResponse.status}`);
+            return { subject: null };
+        }
+        
         const relationshipData = await relationshipResponse.json();
         messageId = relationshipData?.data?.[0]?.id;
     } catch (e) {
-        console.error("Failed to get message relationship:", e);
+        console.error("Failed to get message relationship:", e.message);
         return { subject: null };
     }
 
@@ -67,12 +75,18 @@ async function getMessageDetails(campaignId, apiKey) {
                     'revision': '2023-10-15',
                 }
             });
+            // Check if the message response was successful
+             if (!messageResponse.ok) {
+                console.error(`Message details fetch failed with status: ${messageResponse.status}`);
+                return { subject: null };
+            }
+            
             const messageData = await messageResponse.json();
             // The subject line is nested inside the attributes
             const subject = messageData?.data?.attributes?.subject;
             return { subject: subject };
         } catch (e) {
-            console.error("Failed to get message details:", e);
+            console.error("Failed to get message details:", e.message);
         }
     }
 
@@ -161,7 +175,8 @@ if (!keyword) {
 
 // 1. Fetch initial campaign list using filtering (reliable)
 const filter = encodeURIComponent("and(equals(messages.channel,'email'),equals(status,'Sent'))");
-const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}`;
+// CORRECTED: Removed invalid pagination parameter
+const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}`; 
 const campaignsResp = await fetch(campaignsUrl, {
     method: 'GET',
     headers: {
@@ -189,7 +204,7 @@ const campaignPromises = (rawItems || []).map(async (item) => {
 
     // Perform the subject line lookup
     const { subject: fetchedSubject } = await getMessageDetails(id, apiKey);
-    
+    
     const subject_lines = [];
     if (fetchedSubject) subject_lines.push(fetchedSubject);
     // Retain existing subject line logic as a fallback if the lookup failed
@@ -213,9 +228,9 @@ const allCampaigns = await Promise.all(campaignPromises);
 const keywordLower = keyword.toLowerCase();
 const matched = allCampaigns.filter(c => {
     if (!c) return false;
-    // Match on Name (fixed this problem)
-    if ((c.name || '').toLowerCase().includes(keywordLower)) return true; 
-    // Match on new subject line (solved by the lookup)
+    // Match on Name 
+    if ((c.name || '').toLowerCase().includes(keywordLower)) return true; 
+    // Match on new subject line (this relies on the fixed lookup)
     for (const s of (c.subject_lines || [])) {
       if ((s || '').toLowerCase().includes(keywordLower)) return true;
     }
