@@ -37,13 +37,12 @@ req.on('error', (e) => reject(e));
 // ✅ NEW HELPER FUNCTION: Fetches the Subject Line from the Campaign Message (ROBUST FIX)
 // --------------------------------------------------------------------------------------
 async function getMessageDetails(campaignId, apiKey) {
-    // 1. First, fetch the message ID associated with the campaign
-    // FIXED: Added trailing slash to ensure correct URL structure for V3 relationship endpoint
-    const messageRelationshipUrl = `${KLAVIYO_V3_API_BASE}/campaigns/${campaignId}/relationships/campaign-messages/`; 
+    // 1. Fetch the message IDs using the direct endpoint: /campaigns/{id}/campaign-messages
+    const messagesUrl = `${KLAVIYO_V3_API_BASE}/campaigns/${campaignId}/campaign-messages`;
     let messageId = null;
 
     try {
-        const relationshipResponse = await fetch(messageRelationshipUrl, {
+        const messagesResponse = await fetch(messagesUrl, {
             headers: {
                 'Authorization': `Klaviyo-API-Key ${apiKey}`,
                 'Accept': 'application/json',
@@ -51,20 +50,21 @@ async function getMessageDetails(campaignId, apiKey) {
             }
         });
         
-        // Check if the response was successful before parsing JSON
-        if (!relationshipResponse.ok) {
-            console.error(`Relationship fetch failed with status: ${relationshipResponse.status}`);
+        if (!messagesResponse.ok) {
+            // Log for Vercel, but continue
+            console.error(`Messages fetch failed: ${messagesResponse.status}`);
             return { subject: null };
         }
         
-        const relationshipData = await relationshipResponse.json();
-        messageId = relationshipData?.data?.[0]?.id;
+        const messagesData = await messagesResponse.json();
+        // The message ID is usually the ID of the first data element
+        messageId = messagesData?.data?.[0]?.id;
     } catch (e) {
-        console.error("Failed to get message relationship:", e.message);
+        console.error("Failed to get message IDs:", e.message);
         return { subject: null };
     }
 
-    // 2. Use the message ID to fetch the full message details
+    // 2. Use the message ID to fetch the full message details (Subject Line)
     if (messageId) {
         const messageUrl = `${KLAVIYO_V3_API_BASE}/campaign-messages/${messageId}`;
         try {
@@ -75,18 +75,21 @@ async function getMessageDetails(campaignId, apiKey) {
                     'revision': '2023-10-15',
                 }
             });
-            // Check if the message response was successful
-             if (!messageResponse.ok) {
-                console.error(`Message details fetch failed with status: ${messageResponse.status}`);
-                return { subject: null };
-            }
             
+            if (!messageResponse.ok) {
+                 console.error(`Subject fetch failed: ${messageResponse.status}`);
+                 return { subject: null };
+            }
+
             const messageData = await messageResponse.json();
-            // The subject line is nested inside the attributes
-            const subject = messageData?.data?.attributes?.subject;
-            return { subject: subject };
+            // The subject line is located under data.attributes.definition.content.subject
+            const subject = messageData?.data?.attributes?.definition?.content?.subject;
+            
+            if (subject) {
+                return { subject: subject };
+            }
         } catch (e) {
-            console.error("Failed to get message details:", e.message);
+            console.error("Failed to get message details (subject):", e.message);
         }
     }
 
