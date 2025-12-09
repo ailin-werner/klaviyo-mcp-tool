@@ -118,7 +118,7 @@ if (!keyword) {
 // 1. Fetch initial campaign list using 'include' (Most reliable V3 method)
 const filter = encodeURIComponent("and(equals(messages.channel,'email'),equals(status,'Sent'))");
 // 💥 NEW: Using 'include' to fetch messages in one reliable request.
-const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}&include=campaign-messages`; 
+const campaignsUrl = `${KLAVIYO_BASE}/campaigns?filter=${filter}&include=campaign-messages`; 
 const campaignsResp = await fetch(campaignsUrl, {
     method: 'GET',
     headers: {
@@ -172,43 +172,12 @@ const allCampaigns = (rawItems || []).map(item => {
     };
 });
 
-const allCampaigns = (rawItems || []).map(item => {
-    const id = item.id || item?.campaign_id || item?.uid || (item?.attributes && item.attributes.id) || null;
-    const attrs = item.attributes || item || {};
-    const name = attrs.name || attrs.title || item.name || item.title || '';
-    const created_at = attrs.created_at || attrs.created || attrs.sent_at || attrs.scheduled || item.created_at || item.sent_at || null;
 
-    const subject_lines = [];
-    // 💥 NEW: Extract subject from the 'included' section based on relationship
-    const messageRelationship = item?.relationships?.['campaign-messages']?.data?.[0];
-    if (messageRelationship) {
-        const message = includedMessages.find(i => i.id === messageRelationship.id);
-        // The subject is deeply nested in the message definition
-        const subject = message?.attributes?.definition?.content?.subject;
-        if (subject) subject_lines.push(subject);
-    }
-
-    // Keep old subject logic as fallback for any pre-V3 data
-    if (Array.isArray(attrs.subject_lines)) subject_lines.push(...attrs.subject_lines.filter(Boolean));
-    if (attrs.subject) subject_lines.push(attrs.subject);
-    if (item.subject) subject_lines.push(item.subject);
-
-    return {
-      id: id ? String(id) : null,
-      name,
-      subject_lines: Array.from(new Set(subject_lines)).filter(Boolean),
-      created_at,
-      raw: item,
-    };
-});
-
-
-
-// 3. Apply keyword filtering 
+// 3. Apply keyword filtering 
 const keywordLower = keyword.toLowerCase();
 const matched = allCampaigns.filter(c => {
     if (!c) return false;
-    // Match on Name 
+    // Match on Name 
     if ((c.name || '').toLowerCase().includes(keywordLower)) return true; 
     // Match on subject line (This is now reliable!)
     for (const s of (c.subject_lines || [])) {
@@ -222,7 +191,7 @@ const performance_metrics = [];
 const themes = [];
 const campaignsResult = [];
 
-// 4. Process matches 
+// 4. Process matches 
 for (const c of matched) {
     let metrics = { open_rate: null, click_rate: null, conversion_rate: null, sent: null, revenue: null, raw: null };
     try {
