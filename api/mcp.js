@@ -3,11 +3,22 @@ api/mcp.js
 Minimal Vercel serverless route implementing a Klaviyo helper endpoint.
 */
 
-const fetch = (typeof globalThis !== 'undefined' && globalThis.fetch)
-? globalThis.fetch.bind(globalThis)
-: (function () {
-try { return require('node-fetch'); } catch (e) { return undefined; }
-})();
+// --- ROBUST FETCH INITIALIZATION FIX ---
+// This handles Vercel's environment where native fetch might be missing,
+// relying on the 'node-fetch' dependency which must be in package.json.
+let fetch = globalThis.fetch;
+if (!fetch) {
+    try {
+        // node-fetch is required for Vercel functions to make external HTTP requests
+        fetch = require('node-fetch');
+    } catch (e) {
+        console.error("node-fetch dependency not found. Please ensure it's in package.json.");
+    }
+}
+if (fetch) {
+    // Bind fetch to ensure 'this' context is correct for older node-fetch versions
+    fetch = fetch.bind(globalThis);
+}
 
 const KLAVIYO_BASE = 'https://a.klaviyo.com/api';
 
@@ -31,7 +42,7 @@ req.on('error', (e) => reject(e));
 }
 
 // --------------------------------------------------------------------------------------
-// --- Helper Function: Strip HTML Tags (Original) ---
+// --- Helper Function: Strip HTML Tags (Base) ---
 // --------------------------------------------------------------------------------------
 
 function stripHtml(html) {
@@ -41,7 +52,7 @@ function stripHtml(html) {
 }
 
 // --------------------------------------------------------------------------------------
-// --- NEW Helper Function: Clean HTML Body for Analysis ---
+// --- NEW Helper Function: Clean HTML Body for Analysis (Improved Theme Generation) ---
 // --------------------------------------------------------------------------------------
 
 function cleanBodyForAnalysis(html) {
@@ -68,6 +79,12 @@ async function getTemplateHtml(templateId, apiKey) {
 
     const url = `${KLAVIYO_BASE}/templates/${templateId}`;
     
+    // Check if fetch is available before making the call
+    if (!fetch) {
+        console.error("Fetch is not defined. Cannot fetch template.");
+        return '';
+    }
+
     try {
         const resp = await fetch(url, {
             method: 'GET',
@@ -171,6 +188,11 @@ if (!apiKey) {
 if (!keyword) {
     return jsonResponse(res, { error: 'missing_parameter', details: 'keyword is required' }, 400);
 }
+// Check for fetch dependency failure before making external calls
+if (!fetch) {
+    return jsonResponse(res, { error: 'server_misconfigured', details: 'The \'node-fetch\' dependency is required but was not found or failed to load.' }, 500);
+}
+
 
 // 1. Fetch initial campaign list using 'include' (Corrected URL: only campaign-messages allowed)
 const filter = encodeURIComponent("and(equals(messages.channel,'email'),equals(status,'Sent'))");
@@ -269,7 +291,7 @@ for (const c of matched) {
     const body_html = await getTemplateHtml(c.template_id, apiKey);
     
     // --- B. Extract Plain Text and CTA Text/Link (Using the new cleanBodyForAnalysis) ---
-    const body_text = cleanBodyForAnalysis(body_html); // <--- CHANGE HERE
+    const body_text = cleanBodyForAnalysis(body_html);
     let cta_text = null;
     let cta_link = null;
     
@@ -280,16 +302,22 @@ for (const c of matched) {
         // Clean up the CTA text from extra whitespace and characters
         cta_text = stripHtml(ctaMatch[1]).trim(); 
         
-        // Simple regex to find the primary link near the button text
-        // Need to be a bit more robust here, looking for the nearest <a> tag with an href
-        const linkMatch = body_html.match(/<a[^>]*href=\"([^\"]+)\"[^>]*>.*?Shop Now.*?<\/a>/is); // Targeted search for the Shop Now button link
+        // Targeted search for the link within the button's wrapper (assuming the button is an <a> tag)
+        // This is tricky as Klaviyo often nests the link inside a table structure.
+        // We look for the nearest <a> tag with an href attribute.
+        const ctaButtonHtml = body_html.substring(body_html.indexOf(ctaMatch[0]));
+        const linkMatch = ctaButtonHtml.match(/<a[^>]*href=\"([^\"]+)\"[^>]*>/is);
+        
         if (linkMatch && linkMatch[1]) {
             cta_link = linkMatch[1].trim();
         } else {
-             // Fallback: search for any link in the vicinity of the button text
-             const broaderLinkMatch = body_html.match(/<a[^>]*href=\"([^\"]+)\"[^>]*>/i);
-             if (broaderLinkMatch && broaderLinkMatch[1]) {
-                 cta_link = broaderLinkMatch[1].trim();
+             // Fallback: search for the first link in the main content area for the CTA
+             const contentAreaMatch = body_html.match(/<div class=\"content-padding.*?>([\s\S]*?)<\/div>/i);
+             if (contentAreaMatch && contentAreaMatch[1]) {
+                 const broaderLinkMatch = contentAreaMatch[1].match(/<a[^>]*href=\"([^\"]+)\"[^>]*>/i);
+                 if (broaderLinkMatch && broaderLinkMatch[1]) {
+                     cta_link = broaderLinkMatch[1].trim();
+                 }
              }
         }
     }
@@ -330,16 +358,17 @@ for (const c of matched) {
     // --- D. Theme Generation (Using clean text) ---
     const textToAnalyze = [c.name, c.preview_text].concat(c.subject_lines || []).join(' ') + ' ' + body_text;
     const tokens = textToAnalyze.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-    // Filter out generic short words common in email structures (like 'to', 'the', 'for', 'in', 'out', 'up', 'td', 'tr', 'div', etc.)
-    const stopWords = new Set(['the', 'and', 'for', 'you', 'with', 'td', 'tr', 'div', 'p', 'kl', 'mj', 'to', 'of', 'in', 'on', 'at', 'is', 'it', 'from', 'by', 'as', 'we', 'i', 'a', 'an', 'only', 'out', 'up', 'down', 'here', 'now']);
+    // Filter out generic short words and common structural/stop words
+    const stopWords = new Set(['the', 'and', 'for', 'you', 'with', 'to', 'of', 'in', 'on', 'at', 'is', 'it', 'from', 'by', 'as', 'we', 'i', 'a', 'an', 'only', 'out', 'up', 'down', 'here', 'now', 'or', 'your', 'us', 'our', 'what', 'day']);
     const freq = {};
     tokens.forEach(t => { 
-        if (t.length > 2 && !stopWords.has(t)) {
+        // Also exclude words common in email footers/branding but not content (like unsubscribe/klaviyo)
+        if (t.length > 2 && !stopWords.has(t) && !t.includes('klaviyo') && !t.includes('unsubscribe')) {
              freq[t] = (freq[t] || 0) + 1; 
         }
     });
     
-    const topThemes = Object.keys(freq).sort((a,b) => freq[b] - freq[a]).slice(0, 5); // Now theme analysis is based on cleaned text
+    const topThemes = Object.keys(freq).sort((a,b) => freq[b] - freq[a]).slice(0, 5); 
     
     for (const subj of (c.subject_lines || [])) {
       subject_lines.push({ campaign_id: c.id, subject: subj });
