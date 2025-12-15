@@ -2,7 +2,7 @@
 
 This server accepts POST /mcp with:
 {
-  "keyword": "shipping",
+  "keyword": "{{Variable value}}",
   "days": 90,
   "limit": 15
 }
